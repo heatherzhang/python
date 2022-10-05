@@ -1,0 +1,39 @@
+from sqlalchemy import create_engine
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from sqlalchemy import __version__ as sqlalchemy_version
+from packaging.version import parse as version_parse
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import time
+from timeit import default_timer as timer
+
+src_pg = PostgresHook(postgres_conn_id='dbconn_defined_in_af')
+db_conn = src_pg.get_conn()
+
+url_dialect = "postgresql" if version_parse(sqlalchemy_version) >= version_parse("1.4.0") else "postgres"
+db_url = f"{url_dialect}://{db_conn.info.user}:{db_conn.info.password}@{db_conn.info.host}:{db_conn.info.port}/{db_conn.info.dbname}"
+
+engine = create_engine(db_url)
+conn = engine.connect().connection  
+
+
+def read_csv_strip(csv_file_name):
+    df = pd.read_csv(csv_file_name, quotechar='"', encoding="utf-8", dtype="str")
+    
+    for col in df.columns:
+        if pd.api.types.is_string_dtype(df[col]):
+            df[col] = df[col].str.strip()
+    df = df.replace({"":np.nan}) 
+    return df
+    
+df_csv = read_csv_strip("/localdir/localfilename.csv")
+df_csv = df_csv.rename(columns=lambda x: x.strip().lower())
+
+start = timer()
+rows_csv = df_csv.to_sql("db_table", engine, schema='staging', index=False, if_exists='replace')
+end = timer()
+elapsed_time = end - start
+print 'completed in %s sec!' %(elapsed_time)
+
+
